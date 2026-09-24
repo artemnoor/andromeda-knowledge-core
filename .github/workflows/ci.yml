@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check src tests alembic scripts
+      - name: Type check
+        run: mypy src
+      - name: Tests
+        run: pytest -q
+      - name: Migration check
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci-migration.db
+        run: alembic check
+
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: andromeda
+          POSTGRES_USER: andromeda
+          POSTGRES_PASSWORD: ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U andromeda -d andromeda"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Upgrade empty PostgreSQL schema
+        env:
+          DATABASE_URL: postgresql+asyncpg://andromeda:ci-only@localhost:5432/andromeda
+        run: alembic upgrade head

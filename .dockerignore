@@ -1,0 +1,10 @@
+.env
+.git
+.gitignore
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.db
+*.sqlite3
+__pycache__
+tests
