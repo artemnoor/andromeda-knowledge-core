@@ -20,6 +20,7 @@ from andromeda_core.infrastructure.db.models import (
     DependencyModel,
     DerivedValueModel,
     FactModel,
+    IngestionPipelineModel,
     KnowledgeObjectModel,
     ObjectTypeModel,
     ObservationModel,
@@ -193,6 +194,51 @@ class CoreRepository:
     async def list_sources(self) -> list[dict[str, Any]]:
         result = await self.session.execute(select(SourceModel).order_by(desc(SourceModel.created_at)))
         return [serialize_model(item) for item in result.scalars()]
+
+    async def find_latest_pipeline(self, pipeline_key: str) -> dict[str, Any] | None:
+        result = await self.session.execute(
+            select(IngestionPipelineModel)
+            .where(IngestionPipelineModel.pipeline_key == pipeline_key)
+            .order_by(desc(IngestionPipelineModel.created_at), desc(IngestionPipelineModel.id))
+            .limit(1)
+        )
+        model = result.scalar_one_or_none()
+        return serialize_model(model) if model else None
+
+    async def find_pipeline_by_checksum(self, pipeline_key: str, document_checksum: str) -> dict[str, Any] | None:
+        result = await self.session.execute(
+            select(IngestionPipelineModel)
+            .where(
+                IngestionPipelineModel.pipeline_key == pipeline_key,
+                IngestionPipelineModel.document_checksum == document_checksum,
+            )
+            .limit(1)
+        )
+        model = result.scalar_one_or_none()
+        return serialize_model(model) if model else None
+
+    async def create_pipeline(self, data: dict[str, Any]) -> dict[str, Any]:
+        model = IngestionPipelineModel(
+            **{
+                **data,
+                "fetch_metadata_json": json_safe(data.get("fetch_metadata_json", {})),
+                "extraction_json": json_safe(data.get("extraction_json", [])),
+                "publish_result_json": json_safe(data.get("publish_result_json", {})),
+            }
+        )
+        self.session.add(model)
+        await self.flush()
+        return serialize_model(model)
+
+    async def update_pipeline(self, pipeline_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        model = await self._get(IngestionPipelineModel, pipeline_id, "ingestion_pipeline")
+        for key, value in data.items():
+            if key in {"fetch_metadata_json", "extraction_json", "publish_result_json"}:
+                value = json_safe(value)
+            setattr(model, key, value)
+        model.updated_at = utc_now()
+        await self.flush()
+        return serialize_model(model)
 
     async def find_observation_by_key(self, idempotency_key: str) -> dict[str, Any] | None:
         result = await self.session.execute(select(ObservationModel).where(ObservationModel.idempotency_key == idempotency_key))

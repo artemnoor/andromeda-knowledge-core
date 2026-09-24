@@ -7,6 +7,7 @@ ontology version, fact or normative rule.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -19,6 +20,32 @@ class EvidenceRef:
 
 
 @dataclass(frozen=True, slots=True)
+class ExtractionContext:
+    """Stable context supplied to every document extraction attempt.
+
+    The ontology snapshot is part of the extraction contract, not optional
+    adapter metadata.  Keeping it on the context makes it impossible for an
+    HTTP adapter to silently omit the object/property/relation vocabulary.
+    """
+
+    source_id: str
+    source_url: str
+    item_key: str
+    profile: str
+    ontology_snapshot: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def ontology_for_prompt(self) -> dict[str, Any]:
+        """Return a detached, canonical snapshot safe to serialize for an AI request."""
+
+        snapshot = deepcopy(self.ontology_snapshot)
+        snapshot["object_types"] = snapshot.get("object_types", snapshot.get("ObjectTypes", []))
+        snapshot["properties"] = snapshot.get("properties", snapshot.get("Properties", []))
+        snapshot["relations"] = snapshot.get("relations", snapshot.get("relation_types", snapshot.get("Relations", [])))
+        return snapshot
+
+
+@dataclass(frozen=True, slots=True)
 class Proposal:
     proposal_type: str
     payload: dict[str, Any]
@@ -28,7 +55,18 @@ class Proposal:
 
 
 class DocumentUnderstandingPort(Protocol):
-    async def extract(self, *, source_id: str, content: bytes, metadata: dict[str, Any]) -> Sequence[Proposal]: ...
+    async def extract(
+        self,
+        *,
+        source_id: str,
+        content: bytes,
+        metadata: dict[str, Any],
+        context: ExtractionContext | None = None,
+    ) -> Sequence[Proposal]: ...
+
+
+class ContextualDocumentUnderstandingPort(Protocol):
+    async def extract(self, *, context: ExtractionContext, content: bytes) -> Sequence[Proposal]: ...
 
 
 class EntityResolutionPort(Protocol):

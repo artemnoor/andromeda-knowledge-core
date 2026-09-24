@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -170,6 +171,39 @@ class SourceDocumentModel(Base):
     content_metadata: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, default=dict)
     retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class IngestionPipelineModel(Base):
+    """Durable source refresh attempts and resumable stage payloads."""
+
+    __tablename__ = "ingestion_pipeline_runs"
+    __table_args__ = (
+        UniqueConstraint("pipeline_key", "document_checksum", name="uq_ingestion_pipeline_checksum"),
+        Index("ix_ingestion_pipeline_key", "pipeline_key"),
+        Index("ix_ingestion_pipeline_key_created", "pipeline_key", "created_at"),
+        Index("ix_ingestion_pipeline_status", "status"),
+        Index("ix_ingestion_pipeline_source_id", "source_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    pipeline_key: Mapped[str] = mapped_column(String(128))
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"))
+    source_url: Mapped[str] = mapped_column(Text)
+    item_key: Mapped[str] = mapped_column(String(255))
+    profile: Mapped[str] = mapped_column(String(128))
+    document_checksum: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(32))
+    last_successful_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    failed_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fetched_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fetch_metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, default=dict)
+    extraction_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON_TYPE, default=list)
+    publish_result_json: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, default=dict)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ProvenanceRecordModel(Base):

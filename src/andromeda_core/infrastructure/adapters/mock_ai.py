@@ -6,7 +6,7 @@ import hashlib
 from collections.abc import Sequence
 from typing import Any
 
-from andromeda_core.domain.ports.ai import EvidenceRef, Proposal
+from andromeda_core.domain.ports.ai import EvidenceRef, ExtractionContext, Proposal
 
 
 def _content_hash(content: bytes) -> str:
@@ -14,13 +14,23 @@ def _content_hash(content: bytes) -> str:
 
 
 class MockDocumentUnderstandingAdapter:
-    async def extract(self, *, source_id: str, content: bytes, metadata: dict[str, Any]) -> Sequence[Proposal]:
+    async def extract(
+        self,
+        *,
+        source_id: str | None = None,
+        content: bytes,
+        metadata: dict[str, Any] | None = None,
+        context: ExtractionContext | None = None,
+    ) -> Sequence[Proposal]:
+        resolved_source_id = context.source_id if context else source_id
+        if not resolved_source_id:
+            raise ValueError("source_id or context is required")
         return [
             Proposal(
                 proposal_type="OBSERVATION_CANDIDATE",
-                payload={"source_id": source_id, "metadata": {"keys": sorted(metadata)}},
+                payload={"source_id": resolved_source_id, "metadata": {"keys": sorted(metadata or {})}},
                 confidence=0.5,
-                evidence=(EvidenceRef(source_id=source_id, locator={"content_sha256": _content_hash(content)}),),
+                evidence=(EvidenceRef(source_id=resolved_source_id, locator={"content_sha256": _content_hash(content)}),),
                 adapter="mock-document-understanding",
             )
         ]

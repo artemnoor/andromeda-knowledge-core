@@ -7,6 +7,7 @@ import json
 from collections.abc import Sequence
 
 from andromeda_core.domain.common import SourceType
+from andromeda_core.domain.ports.ai import ExtractionContext
 from andromeda_core.domain.ports.sources import (
     ObservationCandidate,
     SourceAdapter,
@@ -18,7 +19,9 @@ from andromeda_core.domain.ports.sources import (
 class MockSourceAdapter(SourceAdapter):
     source_type = SourceType.IMPORT
 
-    async def fetch(self, source: SourceDescriptor) -> SourceFetchResult:
+    async def fetch(self, source: SourceDescriptor | ExtractionContext) -> SourceFetchResult:
+        if isinstance(source, ExtractionContext):
+            source = SourceDescriptor(source_id=source.source_id, source_type=self.source_type, locator=source.source_url)
         payload = {"source_id": source.source_id, "locator": source.locator, "kind": "mock"}
         content = json.dumps(payload, sort_keys=True).encode("utf-8")
         return SourceFetchResult(source=source, content=content, content_type="application/json", metadata={"checksum": hashlib.sha256(content).hexdigest()})
