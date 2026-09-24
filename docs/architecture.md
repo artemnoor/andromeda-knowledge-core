@@ -10,7 +10,7 @@ flowchart TB
   App --> Domain[Domain: ontology, knowledge, rules, DSL, engine]
   App --> Ports[Repository ports]
   Ports --> DB[(PostgreSQL)]
-  Ingestion[Andromeda Ingestion Platform] -->|ontology snapshot / source metadata / observations| API
+  Ingestion[Andromeda Ingestion Platform] -->|ontology snapshot / source metadata / observations / rule candidates| API
 ```
 
 ## Core modules
@@ -35,5 +35,5 @@ stable HTTP contracts, never by shared ORM models or direct database access.
 Ingestion owns discovery, fetching, raw bytes, preparation, AI extraction,
 candidate validation, refresh/retry orchestration and its own operational
 metadata. Core owns ontology, canonical semantic records and decisions about
-whether an incoming observation is mapped, reviewed or accepted. This means a
+whether an incoming observation or rule candidate is mapped, reviewed or accepted. This means a
 new source website or AI provider can be added without changing Core code.

@@ -279,8 +279,8 @@ async def test_rule_candidate_is_first_class_and_keeps_source_document_provenanc
         "logical_key": "admission.unknown_benefit",
         "rule_type": "admission_benefit",
         "scope": {"campaign_year": 2027},
-        "conditions": {"kind": "comparison", "operator": ">=", "left": {"kind": "context", "path": "campaign_year"}, "right": 2027},
-        "effects": [{"type": "SET", "target": "unknown_benefit", "value": True}],
+        "conditions": {"kind": "exists", "target": {"kind": "fact", "property": "RegionalEducationalCoefficient", "id": "candidate-fact-1"}},
+        "effects": [{"type": "GRANT", "target": "benefit_x", "value": True}],
         "priority": 20,
         "confidence": "0.95",
         "confidence_status": "HIGH_CONFIDENCE",
@@ -316,3 +316,71 @@ async def test_rule_candidate_is_first_class_and_keeps_source_document_provenanc
     assert second.json()["rule"]["version"] == 2
     versions = await client.get("/api/v1/rules", params={"status": "REVIEW"})
     assert {item["version"] for item in versions.json() if item["logical_key"] == "admission.unknown_benefit"} == {1, 2}
+
+
+async def test_rule_candidate_effect_targets_are_output_channels_not_ontology_concepts(
+    client: httpx.AsyncClient, seeded_app: tuple[Any, dict[str, Any]]
+) -> None:
+    _, seed = seeded_app
+    source_document = await client.post(
+        "/api/v1/source-documents",
+        headers=EDITOR,
+        json={
+            "source_id": seed["source_id"],
+            "document_checksum": "rule-candidate-derived-targets",
+            "title": "Derived target regulation",
+            "content_metadata": {"page": 3},
+        },
+    )
+    assert source_document.status_code == 201, source_document.text
+    document_id = source_document.json()["id"]
+
+    def candidate(candidate_id: str, effect: dict[str, Any], *, conditions: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "candidate_id": candidate_id,
+            "logical_key": f"admission.derived-target.{candidate_id}",
+            "rule_type": "admission_benefit",
+            "scope": {"campaign_year": 2027},
+            "conditions": conditions or {"kind": "comparison", "operator": ">=", "left": {"kind": "context", "path": "campaign_year"}, "right": 2027},
+            "effects": [effect],
+            "confidence": "0.95",
+            "confidence_status": "HIGH_CONFIDENCE",
+            "evidence": [{"page": 3, "quote": "Derived outcome"}],
+            "source_id": seed["source_id"],
+            "source_document_id": document_id,
+            "ontology_version_id": seed["ontology_id"],
+        }
+
+    add_score = await client.post(
+        "/api/v1/rules/candidates",
+        headers={**EDITOR, "Idempotency-Key": "derived-target-add"},
+        json=candidate("derived-add", {"type": "ADD", "target": "admission_score", "value": 30}),
+    )
+    assert add_score.status_code == 201, add_score.text
+    assert add_score.json()["status"] == "DRAFT"
+    assert add_score.json()["review_id"] is None
+    assert add_score.json()["proposal_id"] is None
+
+    grant_benefit = await client.post(
+        "/api/v1/rules/candidates",
+        headers={**EDITOR, "Idempotency-Key": "derived-target-grant"},
+        json=candidate("derived-grant", {"type": "GRANT", "target": "benefit_x", "value": True}),
+    )
+    assert grant_benefit.status_code == 201, grant_benefit.text
+    assert grant_benefit.json()["status"] == "DRAFT"
+    assert grant_benefit.json()["review_id"] is None
+    assert grant_benefit.json()["proposal_id"] is None
+
+    unknown_relation = await client.post(
+        "/api/v1/rules/candidates",
+        headers={**EDITOR, "Idempotency-Key": "unknown-relation-candidate"},
+        json=candidate(
+            "unknown-relation",
+            {"type": "SET", "target": "eligibility", "value": True},
+            conditions={"kind": "exists", "target": {"kind": "relation", "relation_type": "UNKNOWN_RELATION", "id": "relation-1"}},
+        ),
+    )
+    assert unknown_relation.status_code == 201, unknown_relation.text
+    assert unknown_relation.json()["status"] == "NEEDS_REVIEW"
+    assert unknown_relation.json()["proposal_id"]
+    assert unknown_relation.json()["review_id"]

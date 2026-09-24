@@ -9,9 +9,9 @@ mutate the ontology.
 ```mermaid
 flowchart LR
   Ingestion[Ingestion: profile + ontology snapshot + document] --> AI[Mock or HTTP JSON AI adapter]
-  AI --> Candidates[ExtractionResult + evidence]
+  AI --> Candidates[Semantic extraction payload + evidence]
   Candidates --> Validation[Ingestion validation]
-  Validation -->|Observation envelope| Core[Knowledge Core]
+  Validation -->|Observation / RuleCandidate envelope| Core[Knowledge Core]
   Core --> Review[Core review / proposal / acceptance]
 ```
 

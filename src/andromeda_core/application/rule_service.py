@@ -495,7 +495,6 @@ def _unknown_rule_concepts(data: dict[str, Any], definitions: dict[str, list[dic
     known_properties = {item["code"] for item in definitions["properties"]}
     known_relations = {item["code"] for item in definitions["relation_types"]}
     known_objects = {item["code"] for item in definitions["object_types"]}
-    known_any = known_properties | known_relations | known_objects
     unknown: set[str] = set()
 
     def visit(node: Any) -> None:
@@ -509,6 +508,10 @@ def _unknown_rule_concepts(data: dict[str, Any], definitions: dict[str, list[dic
                 concept = node.get("relation_type") or node.get("relation_type_code")
                 if isinstance(concept, str) and concept not in known_relations:
                     unknown.add(concept)
+            if kind in {"object", "object_type"}:
+                concept = node.get("object_type") or node.get("object_type_code") or node.get("type")
+                if isinstance(concept, str) and concept not in known_objects:
+                    unknown.add(concept)
             for child in node.values():
                 visit(child)
         elif isinstance(node, list):
@@ -518,8 +521,8 @@ def _unknown_rule_concepts(data: dict[str, Any], definitions: dict[str, list[dic
     visit(data.get("conditions"))
     visit(data.get("exceptions"))
     for effect in data.get("effects", []):
-        target = effect.get("target") if isinstance(effect, dict) else None
-        if isinstance(target, str) and target not in known_any:
-            unknown.add(target)
+        # Effect targets are Rule Engine output channels, not ontology
+        # properties by default.  Nested DSL values still carry semantic
+        # references and are checked by the namespace-aware visitor.
         visit(effect)
     return sorted(unknown)
