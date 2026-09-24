@@ -24,6 +24,7 @@ from andromeda_core.presentation.api.schemas import (
     ObservationCreate,
     RelationCreate,
     SourceCreate,
+    SourceDocumentCreate,
 )
 
 router = APIRouter(tags=["admin: knowledge"], responses=API_ERROR_RESPONSES)
@@ -41,6 +42,15 @@ async def create_source(
 @router.get("/sources", summary="List sources")
 async def list_sources(session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
     return await CoreRepository(session).list_sources()
+
+
+@router.post("/source-documents", summary="Register immutable source document metadata", status_code=201)
+async def create_source_document(
+    payload: SourceDocumentCreate,
+    _: Role = Depends(require_role(Role.EDITOR)),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    return await KnowledgeService(CoreRepository(session)).create_source_document(payload.model_dump(), "EDITOR")
 
 
 @router.post("/observations", summary="Persist an observation from a source", status_code=201)

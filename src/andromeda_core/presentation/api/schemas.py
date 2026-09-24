@@ -135,6 +135,14 @@ class SourceCreate(StrictModel):
     parser_version: str | None = None
 
 
+class SourceDocumentCreate(StrictModel):
+    source_id: str = Field(min_length=1)
+    document_checksum: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=500)
+    content_metadata: dict[str, Any] = Field(default_factory=dict)
+    retrieved_at: datetime | None = None
+
+
 class ObservationCreate(StrictModel):
     source_id: str
     source_document_id: str | None = None

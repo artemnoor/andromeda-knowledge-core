@@ -77,39 +77,3 @@ async def test_fact_correction_closes_current_transaction_version(seeded_app: tu
         assert any(item["id"] == first["id"] for item in historical)
         changes = await repository.list_changes("FACT_CHANGED")
         assert any(item["entity_id"] == second["id"] and item["before_json"]["id"] == first["id"] for item in changes)
-
-
-@pytest.mark.asyncio
-async def test_ingestion_pipeline_store_persists_document_and_extraction_for_retry(seeded_app: tuple[Any, dict[str, Any]]) -> None:
-    app, seed = seeded_app
-    async with app.state.session_factory() as session:
-        repository = CoreRepository(session)
-        row = await repository.create_pipeline(
-            {
-                "id": "pipeline-persistence-test",
-                "pipeline_key": "pipeline-key",
-                "source_id": seed["source_id"],
-                "source_url": "https://example.edu/admission.html",
-                "item_key": "admission",
-                "profile": "education-v1",
-                "document_checksum": "checksum-1",
-                "status": "EXTRACTED",
-                "last_successful_stage": "EXTRACT",
-                "failed_stage": None,
-                "fetched_content": b"document",
-                "content_type": "text/html",
-                "fetch_metadata_json": {"status_code": 200},
-                "extraction_json": [{"proposal_type": "OBSERVATION_CANDIDATE", "payload": {"value": 1}}],
-                "publish_result_json": {},
-                "last_error": None,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
-                "last_run_at": datetime.now(UTC),
-            }
-        )
-        latest = await repository.find_latest_pipeline("pipeline-key")
-
-        assert row["id"] == "pipeline-persistence-test"
-        assert latest is not None
-        assert latest["fetched_content"] == b"document"
-        assert latest["extraction_json"][0]["payload"]["value"] == 1

@@ -41,6 +41,24 @@ class KnowledgeService:
         await self.repo.commit()
         return existing
 
+    async def create_source_document(self, data: dict[str, Any], actor: str) -> dict[str, Any]:
+        await self.repo.find_source(data["source_id"])
+        existing = await self.repo.find_source_document(data["source_id"], data["document_checksum"])
+        if existing:
+            return existing
+        document = await self.repo.create_source_document({"id": new_id(), **data, "created_at": utc_now()})
+        await record_audit(
+            repo=self.repo,
+            actor=actor,
+            action="SOURCE_DOCUMENT_REGISTERED",
+            entity_type="source_document",
+            entity_id=document["id"],
+            after=document,
+            source_id=data["source_id"],
+        )
+        await self.repo.commit()
+        return document
+
     async def create_observation(self, data: dict[str, Any], actor: str) -> dict[str, Any]:
         _validate_confidence_status(data.get("confidence_status", ConfidenceStatus.UNKNOWN.value))
         source = await self.repo.find_source(data["source_id"])

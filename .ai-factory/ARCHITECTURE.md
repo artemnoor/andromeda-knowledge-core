@@ -26,13 +26,12 @@ src/andromeda_core/
 │   ├── derived.py                # derived values, traces and dependencies
 │   ├── review.py                 # human review contracts
 │   ├── dsl/                      # typed serializable Rule DSL
-│   └── ports/                    # repository, source and AI interfaces
+│   └── ports/                    # repository interfaces
 ├── application/                  # use-case orchestration
 ├── infrastructure/
 │   ├── config.py                 # validated settings
 │   ├── db/                       # SQLAlchemy models/session/repositories
 │   ├── observability/            # JSON logs, correlation IDs, metrics
-│   └── adapters/                 # deterministic/mock source and AI adapters
 ├── presentation/api/
 │   ├── admin/                    # ontology, knowledge, rule and review routes
 │   └── semantic/                 # stable consumer-facing routes
@@ -57,7 +56,19 @@ Composition root ─────────────────────
 - Application services orchestrate and enforce policies; they do not parse HTTP.
 - SQLAlchemy repositories implement ports and map persistence rows to domain DTOs.
 - Cross-module access uses a public application/port interface, never private internals.
-- AI output is untrusted proposal data and cannot activate ontology/rule changes.
+- External ingestion and AI extraction are outside this repository. Core accepts
+  only source metadata and untrusted observation proposals over its API; they
+  cannot activate ontology/rule changes without the Core review policy.
+
+## Cross-repository ownership boundary
+
+Andromeda Ingestion Platform owns discovery, HTTP/browser/file fetchers, raw
+artifact bytes, preparation, extraction profiles, AI adapters, candidate
+validation and refresh/retry orchestration. Knowledge Core owns ontology,
+canonical objects, observations, provenance, facts, relations, rules, review,
+audit and semantic evaluation. No shared ORM model or direct database access is
+allowed between the repositories. A changed website or model provider should
+be implemented in Ingestion without a Core code change.
 
 ## Module Boundaries
 

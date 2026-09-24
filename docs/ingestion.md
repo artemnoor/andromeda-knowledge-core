@@ -1,55 +1,37 @@
-# Ingestion pipeline
+# Ingestion boundary
 
-The pipeline is intentionally staged:
+Knowledge Core does not fetch websites, parse PDFs/HTML, call an AI provider or
+store raw bytes. Those responsibilities belong to the separate Andromeda
+Ingestion Platform. Core receives typed source metadata and evidence-backed
+observations through its HTTP API.
 
-~~~mermaid
+```mermaid
 flowchart LR
-  S[Source] --> O[Observation]
-  O --> N[Normalization]
-  N --> M[Ontology mapping]
-  M --> V[Validation]
-  V --> F[Fact or Rule proposal]
-  F --> A[Human/activation policy]
-  A --> I[Dependency invalidation]
-  I --> C[Incremental recalculation]
-~~~
+  Source[Website / PDF / API] --> Ingestion[Andromeda Ingestion Platform]
+  Ingestion -->|GET ontology snapshot| Core[Knowledge Core]
+  Ingestion -->|POST source + source-document metadata| Core
+  Ingestion -->|POST observation + evidence| Core
+  Core --> Review[Validation / review / canonical knowledge]
+```
 
-SourceAdapter implementations fetch and parse into ObservationCandidate
-records. The adapter cannot receive a repository, so it cannot write a Fact.
+The ingestion service owns discovery, HTTP/browser/file fetchers, immutable raw
+artifact storage, preparation, extraction profiles, AI adapters, validation,
+candidate lifecycle, refresh/retry state and ingestion audit. Core owns
+ontology, canonical objects, typed Facts/Relations/Rules, provenance,
+review/activation, derived values and semantic queries.
 
-## Durable refresh and retry
+## Core-facing contract
 
-`IngestionPipelineService` treats `source + item + profile` as a stable stream
-identity, not as a permanent cache key. Every run whose latest attempt is
-`PUBLISHED` or `SKIPPED_UNCHANGED` fetches the source again and compares the
-content checksum. A changed document creates a new attempt; an unchanged one
-returns `SKIPPED_UNCHANGED` without re-running extraction.
+- `GET /api/v1/ontology/snapshot` returns the active ontology definitions and
+  closed Rule DSL schema required by extraction and validation.
+- `POST /api/v1/sources` registers the logical publisher/source identity.
+- `POST /api/v1/source-documents` registers immutable document metadata keyed by
+  `(source_id, document_checksum)`. The raw body remains in ingestion storage;
+  `content_metadata` contains its artifact ID and storage reference.
+- `POST /api/v1/observations` accepts an observation envelope containing
+  `source_document_id`, candidate payload, evidence and idempotency headers.
 
-Every successful stage persists its payload in `ingestion_pipeline_runs`.
-When extraction exists but Core publication failed, the next run publishes
-that saved extraction directly; it does not fetch or call the AI adapter again.
-When only fetch succeeded, extraction resumes from the stored document bytes.
-This prevents a Core outage from turning a valid extraction into a permanent
-false `SKIPPED_UNCHANGED` result.
-
-The `StructuredJsonHttpAIAdapter` receives the complete ontology snapshot
-(object types, properties and relations) in both the system instruction and a
-first-class request field. Provider output remains a proposal until the Core
-publisher validates and accepts it.
-
-The HTTP source adapter validates DNS results, rejects private/non-global
-addresses and credentials, bounds redirects and response size, and converts
-4xx/5xx responses to safe source errors. Discovery supports static URLs,
-sitemaps and same-origin HTML links. Evidence locators include document hashes
-and deterministic HTML/PDF offsets where available.
-
-Observation states are RAW, PARSED, MAPPED, VALIDATED, ACCEPTED, REJECTED and
-NEEDS_REVIEW. Unknown ontology concepts, low confidence, conflicting source
-claims and suspicious changes are reviewable outcomes. Accepted observations
-create a ProvenanceRecord and typed Fact or Relation inside one application
-transaction.
-
-ChangeDetectionService classifies NEW_FACT, FACT_CHANGED, FACT_REMOVED,
-NEW_RELATION, RELATION_CHANGED, NEW_RULE, RULE_CHANGED, RULE_REMOVED,
-UNKNOWN_CONCEPT and CONFLICT. The changes and audit endpoints expose these
-records to review tooling.
+Core never imports the ingestion repository, pipeline models, HTTP fetcher,
+BeautifulSoup/pypdf, browser automation or an AI SDK. A website change or AI
+provider change is therefore implemented in Ingestion adapters and does not
+require a Core change.

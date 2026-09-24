@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from andromeda_core.application.ontology_service import OntologyService
+from andromeda_core.domain.dsl.schema import rule_dsl_schema
 from andromeda_core.infrastructure.db.repositories import CoreRepository
 from andromeda_core.presentation.api.dependencies import Role, get_session, require_role
 from andromeda_core.presentation.api.schemas import (
@@ -19,6 +20,29 @@ from andromeda_core.presentation.api.schemas import (
 )
 
 router = APIRouter(prefix="/ontology", tags=["admin: ontology"], responses=API_ERROR_RESPONSES)
+
+
+@router.get("/snapshot", summary="Read the active ontology extraction snapshot")
+async def get_snapshot(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    repo = CoreRepository(session)
+    active = await repo.get_active_ontology()
+    if active is None:
+        return {
+            "schema_version": "1.0",
+            "ontology_version_id": None,
+            "version_code": None,
+            "object_types": [],
+            "properties": [],
+            "relation_types": [],
+            "rule_dsl_schema": rule_dsl_schema(),
+        }
+    return {
+        "schema_version": "1.0",
+        "ontology_version_id": active["id"],
+        "version_code": active["version_code"],
+        **await repo.ontology_definitions(active["id"]),
+        "rule_dsl_schema": rule_dsl_schema(),
+    }
 
 
 @router.get("/versions", summary="List ontology versions", response_model=list[dict[str, Any]])

@@ -62,6 +62,20 @@ async def test_acceptance_knowledge_what_if_explain_and_rule_replacement(client:
     )
     assert source_replay.status_code == 201
     assert source_replay.json()["id"] == registered_source.json()["id"]
+    snapshot = await client.get("/api/v1/ontology/snapshot")
+    assert snapshot.status_code == 200
+    assert {"object_types", "properties", "relation_types", "rule_dsl_schema"}.issubset(snapshot.json())
+    source_document_payload = {
+        "source_id": registered_source.json()["id"],
+        "document_checksum": "document-checksum-1",
+        "title": "Acceptance source document",
+        "content_metadata": {"raw_content_location": "artifact/source-document-1.bin"},
+    }
+    source_document = await client.post("/api/v1/source-documents", json=source_document_payload, headers=EDITOR)
+    assert source_document.status_code == 201, source_document.text
+    source_document_replay = await client.post("/api/v1/source-documents", json=source_document_payload, headers=EDITOR)
+    assert source_document_replay.status_code == 201
+    assert source_document_replay.json()["id"] == source_document.json()["id"]
     observation_payload = {
         "source_id": registered_source.json()["id"],
         "subject_candidate": {

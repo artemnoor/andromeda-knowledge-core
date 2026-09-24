@@ -1,24 +1,21 @@
-# AI and Jev boundaries
+# AI and extraction boundary
 
-The core defines ports for document understanding, entity resolution, ontology
-mapping, rule extraction and change interpretation. Mock adapters implement the
-ports for tests and local development. A future Jev or LLM adapter can be
-composed without importing its SDK into domain code.
+AI adapters live in Andromeda Ingestion Platform, not in Knowledge Core. They
+receive trusted extraction instructions, a versioned ontology snapshot and
+untrusted prepared document chunks. They return strict candidate contracts with
+confidence and evidence; they do not create canonical facts, activate rules or
+mutate the ontology.
 
-AI output is a Proposal with payload, confidence, evidence references and
-adapter identity. It is not a Fact, active Rule or active OntologyVersion.
-
-~~~mermaid
+```mermaid
 flowchart LR
-  AI[AI/Jev adapter] --> P[Proposal + evidence]
-  P --> R[Review / validation]
-  R --> O[Observation or draft rule]
-  O --> H[Human/policy activation]
-  H --> K[Canonical knowledge]
-~~~
+  Ingestion[Ingestion: profile + ontology snapshot + document] --> AI[Mock or HTTP JSON AI adapter]
+  AI --> Candidates[ExtractionResult + evidence]
+  Candidates --> Validation[Ingestion validation]
+  Validation -->|Observation envelope| Core[Knowledge Core]
+  Core --> Review[Core review / proposal / acceptance]
+```
 
-No adapter is allowed to call activation operations. External content is
-treated as untrusted data; the mock rule adapter hashes bytes and returns a
-draft proposal without executing text. The core does not require external
-credentials and CI uses mocks.
-
+Knowledge Core only validates and persists the observation boundary and applies
+its own ontology, provenance, review and canonical-knowledge policies. It has
+no external AI credentials and no provider SDK dependency. The mock provider is
+used in CI; a live provider is an optional Ingestion deployment concern.

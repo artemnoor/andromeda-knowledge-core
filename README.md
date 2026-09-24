@@ -46,7 +46,7 @@ flowchart LR
   Semantic --> App[Application use cases]
   AdminAPI --> App
   App --> Domain[Pure domain: ontology, DSL, engine, graph]
-  App --> Ports[Ports: repositories, sources, AI/Jev]
+  App --> Ports[Ports: repositories]
   Ports --> PG[(PostgreSQL)]
   Ports --> Adapters[SQLAlchemy and optional adapters]
   Domain --> Derived[Derived knowledge + traces]
@@ -64,7 +64,7 @@ the infrastructure adapter.
 |---|---|---|
 | /api/v1/ontology | versions, definitions, proposals | reader for reads; editor/reviewer for mutations |
 | /api/v1/objects, /facts, /relations | typed knowledge graph data | editor for mutations |
-| /api/v1/sources, /observations | ingestion stages | editor/reviewer |
+| /api/v1/sources, /source-documents, /observations | external ingestion contract | editor/reviewer |
 | /api/v1/rules | create, validate, test, activate | editor; reviewer for activation |
 | /api/v1/derived | materialized values and dependencies | reader; admin for manual invalidation |
 | /api/v1/reviews | approve, reject, modify | reviewer |
@@ -123,10 +123,14 @@ query context and applicant context. Effects are registered generic handlers
 (SET, ADD, SUBTRACT, GRANT, DENY, eligibility markers and EMIT_DERIVED). No
 eval, imports or arbitrary code are involved.
 
-Source adapters and AI/Jev adapters return observations or proposals. They
-cannot activate rules, mutate ontology or overwrite verified facts. Unknown
-concepts create an ontology change proposal and review item. Equal-priority
-contradictory rules create RULE_CONFLICT and remain inactive.
+The separate Andromeda Ingestion Platform discovers and fetches external
+documents, stores raw artifacts, runs extraction adapters and sends
+evidence-backed observations through the Core API. Core does not fetch, parse,
+call AI providers or store raw bytes. It cannot activate rules, mutate ontology
+or overwrite verified facts from an incoming observation without the configured
+review policy. Unknown concepts create an ontology change proposal and review
+item. Equal-priority contradictory rules create RULE_CONFLICT and remain
+inactive.
 
 ## Persistence and operations
 
@@ -178,7 +182,8 @@ numbers are environment-dependent and are not used as correctness gates.
 
 The first release is a modular monolith. Redis, background workers, external
 AI credentials, full-text search, program comparison ranking and distributed
-event delivery are extension points rather than runtime dependencies. SQLite
+event delivery are extension points rather than Core runtime dependencies.
+SQLite
 is a test adapter; production deployment is PostgreSQL. The local X-Role
 header must be replaced by the host authentication boundary before exposing
 admin routes to untrusted networks.

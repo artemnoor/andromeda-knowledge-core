@@ -24,8 +24,10 @@ dependency invalidation behind a stable Semantic API.
 The service is a modular monolith using Explicit Architecture. Pure domain
 modules define entities, value objects, ports and the deterministic Rule DSL.
 Application services orchestrate use cases. Infrastructure adapters implement
-PostgreSQL repositories, observability and source/AI ports. FastAPI is an
-inbound adapter and never contains domain or persistence logic.
+PostgreSQL repositories and observability. FastAPI is an inbound adapter and
+never contains domain or persistence logic. External document ingestion, raw
+artifact storage, preparation and AI providers belong to the separate
+Andromeda Ingestion Platform and communicate through versioned HTTP contracts.
 
 Detailed rules live in `.ai-factory/ARCHITECTURE.md`.
 
@@ -38,4 +40,6 @@ Detailed rules live in `.ai-factory/ARCHITECTURE.md`.
 - Rules and ontology versions are activated atomically and are auditable.
 - Administrative mutation routes are distinct from consumer Semantic API routes.
 - Demo data and seed operations are idempotent.
-- The core must run without external AI credentials; AI adapters are ports and mocks.
+- The core must run without external AI credentials and does not import AI or
+  source-fetching adapters. Ingestion publishes observations through the Core
+  source-document and observation API.

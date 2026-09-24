@@ -14,7 +14,6 @@ dependencies = [
   "alembic==1.14.0",
   "asyncpg==0.30.0",
   "fastapi==0.141.1",
-  "httpx==0.28.1",
   "prometheus-client==0.22.1",
   "pydantic==2.10.6",
   "pydantic-settings==2.7.1",
@@ -26,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "hypothesis==6.125.1",
+  "httpx==0.28.1",
   "mypy==1.20.2",
   "pytest==8.3.4",
   "pytest-asyncio==0.25.3",
