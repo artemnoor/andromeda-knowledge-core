@@ -23,7 +23,9 @@ jobs:
       - name: Migration check
         env:
           DATABASE_URL: sqlite+aiosqlite:///./ci-migration.db
-        run: alembic check
+        run: |
+          alembic upgrade head
+          alembic check
 
   postgres-migrations:
     runs-on: ubuntu-latest
