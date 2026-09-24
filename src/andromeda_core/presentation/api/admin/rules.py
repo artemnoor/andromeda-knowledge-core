@@ -8,9 +8,19 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from andromeda_core.application.rule_service import RuleService
+from andromeda_core.infrastructure.config import Settings
 from andromeda_core.infrastructure.db.repositories import CoreRepository
-from andromeda_core.presentation.api.dependencies import Role, get_session, require_role
-from andromeda_core.presentation.api.schemas import API_ERROR_RESPONSES, RuleCreate
+from andromeda_core.presentation.api.dependencies import (
+    Role,
+    get_session,
+    get_settings,
+    require_role,
+)
+from andromeda_core.presentation.api.schemas import (
+    API_ERROR_RESPONSES,
+    RuleCandidateCreate,
+    RuleCreate,
+)
 
 router = APIRouter(prefix="/rules", tags=["admin: rules"], responses=API_ERROR_RESPONSES)
 
@@ -26,6 +36,19 @@ async def create_rule(
     if idempotency_key:
         data["idempotency_key"] = idempotency_key
     return await RuleService(CoreRepository(session)).create(data, "EDITOR")
+
+
+@router.post("/candidates", summary="Persist an ingestion RuleCandidate", status_code=201)
+async def create_rule_candidate(
+    payload: RuleCandidateCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    _: Role = Depends(require_role(Role.EDITOR)),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    data = payload.model_dump()
+    data["idempotency_key"] = idempotency_key or f"rule-candidate:{payload.candidate_id}"
+    return await RuleService(CoreRepository(session), confidence_review_threshold=settings.confidence_review_threshold).create_candidate(data, "INGESTION")
 
 
 @router.get("", summary="List rule versions")

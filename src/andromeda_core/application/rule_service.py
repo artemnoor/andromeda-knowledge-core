@@ -8,6 +8,7 @@ from uuid import uuid4
 from andromeda_core.application.audit_service import record_audit
 from andromeda_core.application.change_service import ChangeDetectionService
 from andromeda_core.application.dependency_service import DependencyService
+from andromeda_core.application.ontology_service import OntologyService
 from andromeda_core.domain.common import (
     ReviewReason,
     ReviewStatus,
@@ -32,9 +33,187 @@ from andromeda_core.domain.rules import (
 
 
 class RuleService:
-    def __init__(self, repo: RepositoryPort, engine: RuleEngine | None = None) -> None:
+    def __init__(self, repo: RepositoryPort, engine: RuleEngine | None = None, confidence_review_threshold: float = 0.8) -> None:
         self.repo = repo
         self.engine = engine or RuleEngine()
+        self.confidence_review_threshold = confidence_review_threshold
+
+    async def create_candidate(self, data: dict[str, Any], actor: str) -> dict[str, Any]:
+        """Persist a rule candidate with immutable source-document provenance.
+
+        Candidate ingestion is intentionally separate from manual rule creation:
+        it can produce a draft/review item, but it never activates a rule.
+        """
+
+        idempotency_key = data.get("idempotency_key") or f"rule-candidate:{data['candidate_id']}"
+        existing = await self.repo.find_rule_by_idempotency(idempotency_key)
+        if existing:
+            rule = await self.repo.get_rule(existing["id"])
+            return await self._existing_candidate_result(rule, data["candidate_id"])
+
+        source = await self.repo.find_source(data["source_id"])
+        source_document = await self.repo.get_source_document(data["source_document_id"])
+        if source_document["source_id"] != source["id"]:
+            raise ValidationError(
+                "SOURCE_DOCUMENT_MISMATCH",
+                "Rule candidate source_document_id belongs to another source.",
+                {"source_id": source["id"], "source_document_id": source_document["id"]},
+            )
+        ontology = await self.repo.get_ontology(str(data["ontology_version_id"])) if data.get("ontology_version_id") else await self.repo.get_active_ontology()
+        if not ontology:
+            raise ValidationError("NO_ACTIVE_ONTOLOGY", "An active ontology is required for a rule candidate.")
+        data = {**data, "ontology_version_id": ontology["id"], "idempotency_key": idempotency_key}
+        report = validate_rule_payload(data)
+        if not report["valid"]:
+            raise ValidationError("INVALID_RULE_CANDIDATE", "Rule candidate failed Rule DSL validation.", {"validation": report})
+
+        provenance = await self.repo.create_provenance(
+            {
+                "id": str(uuid4()),
+                "source_id": source["id"],
+                "source_document_id": source_document["id"],
+                "observation_id": None,
+                "evidence_locator": {
+                    "source_document_id": source_document["id"],
+                    "candidate_id": data["candidate_id"],
+                    "items": data.get("evidence", []),
+                    "metadata": data.get("metadata", {}),
+                },
+                "extraction_method": "ingestion_rule_candidate",
+                "created_at": utc_now(),
+            }
+        )
+        rule = await self.create({**data, "provenance_id": provenance["id"]}, actor)
+        definitions = await self.repo.ontology_definitions(ontology["id"])
+        unknown_concepts = _unknown_rule_concepts(data, definitions)
+        review_ids: list[str] = []
+        proposal_ids: list[str] = []
+        review_reasons: list[str] = []
+        for concept in unknown_concepts:
+            proposal = await self._create_unknown_concept_review(rule, data, concept, actor)
+            review_ids.append(proposal["review_id"])
+            proposal_ids.append(proposal["proposal_id"])
+            review_reasons.append(ReviewReason.UNKNOWN_CONCEPT.value)
+        if float(data.get("confidence", 0)) < self.confidence_review_threshold:
+            review = await self._create_rule_review(
+                rule,
+                ReviewReason.LOW_CONFIDENCE.value,
+                "Rule candidate confidence is below the configured acceptance threshold.",
+                {"confidence": data.get("confidence", 0), "evidence": data.get("evidence", [])},
+            )
+            review_ids.append(review["id"])
+            review_reasons.append(ReviewReason.LOW_CONFIDENCE.value)
+        active_rules = await self.repo.active_rules()
+        conflicts = [
+            item for item in active_rules
+            if item["logical_key"] != rule["logical_key"] and effect_conflicts(_as_rule_record(rule), _as_rule_record(item))
+        ]
+        if conflicts:
+            review = await self._create_rule_review(
+                rule,
+                ReviewReason.RULE_CONFLICT.value,
+                "Rule candidate conflicts with an active rule of equal priority.",
+                {"conflicting_rule_ids": [item["id"] for item in conflicts]},
+            )
+            review_ids.append(review["id"])
+            review_reasons.append(ReviewReason.RULE_CONFLICT.value)
+            for conflict in conflicts:
+                await self.repo.create_rule_relation(
+                    {
+                        "id": str(uuid4()),
+                        "source_rule_id": rule["id"],
+                        "relation_type": "CONFLICTS_WITH",
+                        "target_rule_id": conflict["id"],
+                        "created_at": utc_now(),
+                    }
+                )
+        if review_reasons:
+            rule = await self.repo.update_rule(rule["id"], {"status": RuleStatus.REVIEW.value}, rule["row_version"])
+        await record_audit(
+            repo=self.repo,
+            actor=actor,
+            action="RULE_CANDIDATE_RECEIVED",
+            entity_type="rule",
+            entity_id=rule["id"],
+            after={"rule": rule, "review_reasons": sorted(set(review_reasons)), "source_document_id": source_document["id"]},
+            source_id=source["id"],
+        )
+        await self.repo.commit()
+        refreshed = await self.repo.get_rule(rule["id"])
+        return {
+            **_candidate_result(refreshed, data["candidate_id"]),
+            "status": "NEEDS_REVIEW" if review_reasons else "DRAFT",
+            "provenance_id": provenance["id"],
+            "source_id": source["id"],
+            "source_document_id": source_document["id"],
+            "review_id": review_ids[0] if review_ids else None,
+            "review_ids": review_ids,
+            "proposal_id": proposal_ids[0] if proposal_ids else None,
+            "proposal_ids": proposal_ids,
+        }
+
+    async def _create_unknown_concept_review(self, rule: dict[str, Any], data: dict[str, Any], concept: str, actor: str) -> dict[str, Any]:
+        proposal = await OntologyService(self.repo).create_unknown_concept_proposal(
+            concept_key=concept,
+            reason="Rule candidate references a concept absent from the selected ontology.",
+            source_evidence={"source_id": data["source_id"], "source_document_id": data["source_document_id"], "evidence": data.get("evidence", [])},
+            confidence=float(data.get("confidence", 0)),
+            actor=actor,
+        )
+        review = await self._create_rule_review(
+            rule,
+            ReviewReason.UNKNOWN_CONCEPT.value,
+            f"Rule candidate references unknown ontology concept '{concept}'.",
+            {"concept_key": concept, "ontology_proposal_id": proposal["proposal_id"]},
+        )
+        return {**proposal, "review_id": review["id"]}
+
+    async def _create_rule_review(self, rule: dict[str, Any], reason: str, summary: str, evidence: dict[str, Any]) -> dict[str, Any]:
+        existing = await self.repo.find_open_review("rule", rule["id"], reason)
+        if existing:
+            return existing
+        now = utc_now()
+        return await self.repo.create_review(
+            {
+                "id": str(uuid4()),
+                "reason": reason,
+                "status": ReviewStatus.NEEDS_REVIEW.value,
+                "entity_type": "rule",
+                "entity_id": rule["id"],
+                "summary": summary,
+                "evidence_json": evidence,
+                "proposed_change_json": {"rule_id": rule["id"]},
+                "decision_json": {},
+                "created_at": now,
+                "updated_at": now,
+                "decided_at": None,
+                "decided_by": None,
+                "row_version": 1,
+            }
+        )
+
+    async def _existing_candidate_result(self, rule: dict[str, Any], candidate_id: str) -> dict[str, Any]:
+        result = _candidate_result(rule, candidate_id)
+        reviews = [
+            item
+            for item in await self.repo.list_reviews(ReviewStatus.NEEDS_REVIEW.value)
+            if item["entity_type"] == "rule" and item["entity_id"] == rule["id"]
+        ]
+        proposal_ids = [
+            item.get("evidence_json", {}).get("ontology_proposal_id")
+            for item in reviews
+            if item.get("evidence_json", {}).get("ontology_proposal_id")
+        ]
+        result.update(
+            {
+                "status": "NEEDS_REVIEW" if reviews else result["status"],
+                "review_id": reviews[0]["id"] if reviews else None,
+                "review_ids": [item["id"] for item in reviews],
+                "proposal_id": proposal_ids[0] if proposal_ids else None,
+                "proposal_ids": proposal_ids,
+            }
+        )
+        return result
 
     async def create(self, data: dict[str, Any], actor: str) -> dict[str, Any]:
         idempotency_key = data.get("idempotency_key")
@@ -300,3 +479,47 @@ def _matched_effects(trace: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _effect_projection(effects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{key: effect.get(key) for key in ("type", "target", "value") if key in effect} for effect in effects]
+
+
+def _candidate_result(rule: dict[str, Any], candidate_id: str) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate_id,
+        "rule_id": rule["id"],
+        "status": "NEEDS_REVIEW" if rule["status"] == RuleStatus.REVIEW.value else rule["status"],
+        "rule": rule,
+        "provenance_id": rule.get("provenance_id"),
+    }
+
+
+def _unknown_rule_concepts(data: dict[str, Any], definitions: dict[str, list[dict[str, Any]]]) -> list[str]:
+    known_properties = {item["code"] for item in definitions["properties"]}
+    known_relations = {item["code"] for item in definitions["relation_types"]}
+    known_objects = {item["code"] for item in definitions["object_types"]}
+    known_any = known_properties | known_relations | known_objects
+    unknown: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            kind = node.get("kind")
+            if kind in {"fact", "facts", "collection"}:
+                concept = node.get("property") or node.get("property_code")
+                if isinstance(concept, str) and concept not in known_properties:
+                    unknown.add(concept)
+            if kind in {"relation", "relations"}:
+                concept = node.get("relation_type") or node.get("relation_type_code")
+                if isinstance(concept, str) and concept not in known_relations:
+                    unknown.add(concept)
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(data.get("conditions"))
+    visit(data.get("exceptions"))
+    for effect in data.get("effects", []):
+        target = effect.get("target") if isinstance(effect, dict) else None
+        if isinstance(target, str) and target not in known_any:
+            unknown.add(target)
+        visit(effect)
+    return sorted(unknown)

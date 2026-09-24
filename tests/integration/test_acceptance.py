@@ -256,3 +256,63 @@ async def test_unknown_concept_and_conflict_enter_review_queue(client: httpx.Asy
     assert blocked.json()["error"]["code"] == "RULE_CONFLICT"
     conflict_reviews = await client.get("/api/v1/reviews", params={"status": "NEEDS_REVIEW"})
     assert any(item["reason"] == "RULE_CONFLICT" for item in conflict_reviews.json())
+
+
+async def test_rule_candidate_is_first_class_and_keeps_source_document_provenance(
+    client: httpx.AsyncClient, seeded_app: tuple[Any, dict[str, Any]]
+) -> None:
+    _, seed = seeded_app
+    source_document = await client.post(
+        "/api/v1/source-documents",
+        headers=EDITOR,
+        json={
+            "source_id": seed["source_id"],
+            "document_checksum": "rule-candidate-document-1",
+            "title": "Regulation candidate source",
+            "content_metadata": {"page": 12},
+        },
+    )
+    assert source_document.status_code == 201, source_document.text
+    document_id = source_document.json()["id"]
+    payload = {
+        "candidate_id": "candidate-rule-1",
+        "logical_key": "admission.unknown_benefit",
+        "rule_type": "admission_benefit",
+        "scope": {"campaign_year": 2027},
+        "conditions": {"kind": "comparison", "operator": ">=", "left": {"kind": "context", "path": "campaign_year"}, "right": 2027},
+        "effects": [{"type": "SET", "target": "unknown_benefit", "value": True}],
+        "priority": 20,
+        "confidence": "0.95",
+        "confidence_status": "HIGH_CONFIDENCE",
+        "evidence": [{"page": 12, "quote": "Benefit X"}],
+        "source_id": seed["source_id"],
+        "source_document_id": document_id,
+        "ontology_version_id": seed["ontology_id"],
+    }
+    headers = {**EDITOR, "Idempotency-Key": "rule-candidate-1"}
+    created = await client.post("/api/v1/rules/candidates", headers=headers, json=payload)
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["status"] == "NEEDS_REVIEW"
+    assert body["rule_id"]
+    assert body["provenance_id"]
+    assert body["proposal_id"]
+    assert body["review_id"]
+    assert body["rule"]["version"] == 1
+    provenance = await client.get(f"/api/v1/provenance/{body['provenance_id']}")
+    assert provenance.status_code == 200, provenance.text
+    assert provenance.json()["source_document"]["id"] == document_id
+    replay = await client.post("/api/v1/rules/candidates", headers=headers, json=payload)
+    assert replay.status_code == 201
+    assert replay.json()["rule_id"] == body["rule_id"]
+
+    version_two_payload = {**payload, "candidate_id": "candidate-rule-2", "effects": [{"type": "SET", "target": "unknown_benefit", "value": False}]}
+    second = await client.post(
+        "/api/v1/rules/candidates",
+        headers={**EDITOR, "Idempotency-Key": "rule-candidate-2"},
+        json=version_two_payload,
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["rule"]["version"] == 2
+    versions = await client.get("/api/v1/rules", params={"status": "REVIEW"})
+    assert {item["version"] for item in versions.json() if item["logical_key"] == "admission.unknown_benefit"} == {1, 2}

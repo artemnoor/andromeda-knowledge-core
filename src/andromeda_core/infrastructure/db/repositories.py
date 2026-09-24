@@ -205,6 +205,9 @@ class CoreRepository:
         model = result.scalar_one_or_none()
         return serialize_model(model) if model else None
 
+    async def get_source_document(self, document_id: str) -> dict[str, Any]:
+        return serialize_model(await self._get(SourceDocumentModel, document_id, "source_document"))
+
     async def create_source_document(self, data: dict[str, Any]) -> dict[str, Any]:
         existing = await self.find_source_document(data["source_id"], data["document_checksum"])
         if existing:
@@ -619,10 +622,18 @@ class CoreRepository:
     async def _provenance_chain(self, provenance_id: str) -> dict[str, Any]:
         provenance = await self._get(ProvenanceRecordModel, provenance_id, "provenance_record")
         source = await self._get(SourceModel, provenance.source_id, "source")
+        source_document = None
+        if provenance.source_document_id:
+            source_document = await self._get(SourceDocumentModel, provenance.source_document_id, "source_document")
         observation = None
         if provenance.observation_id:
             observation = await self._get(ObservationModel, provenance.observation_id, "observation")
-        return {"provenance": serialize_model(provenance), "observation": serialize_model(observation) if observation else None, "source": serialize_model(source)}
+        return {
+            "provenance": serialize_model(provenance),
+            "observation": serialize_model(observation) if observation else None,
+            "source": serialize_model(source),
+            "source_document": serialize_model(source_document) if source_document else None,
+        }
 
     async def explain_provenance(self, provenance_id: str) -> dict[str, Any]:
         """Return the source/evidence chain for any provenance-bearing entity."""

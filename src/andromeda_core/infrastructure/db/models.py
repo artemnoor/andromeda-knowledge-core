@@ -181,6 +181,9 @@ class ProvenanceRecordModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"), index=True)
+    source_document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("source_documents.id"), nullable=True, index=True
+    )
     observation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     evidence_locator: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, default=dict)
     extraction_method: Mapped[str] = mapped_column(String(128), default="manual")

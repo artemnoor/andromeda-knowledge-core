@@ -194,6 +194,7 @@ class KnowledgeService:
             {
                 "id": new_id(),
                 "source_id": observation["source_id"],
+                "source_document_id": observation.get("source_document_id"),
                 "observation_id": observation_id,
                 "evidence_locator": observation["evidence_json"],
                 "extraction_method": "observation_acceptance",

@@ -187,6 +187,31 @@ class RuleCreate(StrictModel):
     test_cases: list[RuleTestCaseCreate] = Field(default_factory=list)
 
 
+class RuleCandidateCreate(StrictModel):
+    """First-class ingestion boundary for a declarative rule candidate."""
+
+    schema_version: str = Field(default="1.0", min_length=1, max_length=32)
+    candidate_id: str = Field(min_length=1, max_length=255)
+    logical_key: str = Field(min_length=1, max_length=255)
+    rule_type: str = Field(default="generic", min_length=1, max_length=64)
+    scope: dict[str, Any] = Field(default_factory=dict)
+    conditions: dict[str, Any]
+    effects: list[dict[str, Any]] = Field(min_length=1)
+    exceptions: list[dict[str, Any]] = Field(default_factory=list)
+    priority: int = 0
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    confidence: Decimal = Field(default=Decimal("1"), ge=0, le=1)
+    confidence_status: str = "UNKNOWN"
+    evidence: list[dict[str, Any]] = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    source_document_id: str = Field(min_length=1)
+    ontology_version_id: str | None = None
+    replaces_rule_id: str | None = None
+    test_cases: list[RuleTestCaseCreate] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class RuleTestRequest(StrictModel):
     test_cases: list[RuleTestCaseCreate] | None = None
 

@@ -71,6 +71,11 @@ async def get_observation(observation_id: str, session: AsyncSession = Depends(g
     return await CoreRepository(session).get_observation(observation_id)
 
 
+@router.get("/provenance/{provenance_id}", summary="Read the immutable source provenance chain")
+async def get_provenance(provenance_id: str, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await CoreRepository(session).explain_provenance(provenance_id)
+
+
 @router.post("/observations/{observation_id}/accept", summary="Promote a validated observation to a fact")
 async def accept_observation(
     observation_id: str,
